@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { Environment, Stars } from "@react-three/drei";
+import { Stars } from "@react-three/drei";
 import { EffectComposer, Bloom } from "@react-three/postprocessing";
 import PaintableCube from "./PaintableCube";
 import AmbientParticles from "./AmbientParticles";
@@ -22,13 +22,13 @@ export default function Scene() {
       <color attach="background" args={["#070714"]} />
       <fog attach="fog" args={["#070714", 8, 20]} />
 
-      <ambientLight intensity={0.3} color="#8080ff" />
-      <directionalLight position={[3, 3, 3]} intensity={0.6} color="#ffffff" />
-      <directionalLight position={[-3, -1, -2]} intensity={0.3} color="#4040ff" />
-      <pointLight position={[0, 3, 0]} intensity={1.2} color="#ff40ff" distance={8} />
-      <pointLight position={[0, -3, 0]} intensity={0.8} color="#4080ff" distance={8} />
-      <pointLight position={[3, 0, 0]} intensity={0.6} color="#ff8040" distance={8} />
-      <pointLight position={[-3, 0, 0]} intensity={0.6} color="#40ffff" distance={8} />
+      <ambientLight intensity={0.25} color="#7070cc" />
+      <directionalLight position={[3, 3, 3]} intensity={0.5} color="#ffffff" />
+      <directionalLight position={[-3, -1, -2]} intensity={0.2} color="#4040ff" />
+      <pointLight position={[0, 3, 0]} intensity={0.8} color="#ff40ff" distance={8} />
+      <pointLight position={[0, -3, 0]} intensity={0.5} color="#4080ff" distance={8} />
+      <pointLight position={[3, 0, 0]} intensity={0.4} color="#ff8040" distance={8} />
+      <pointLight position={[-3, 0, 0]} intensity={0.4} color="#40ffff" distance={8} />
 
       <Stars
         radius={20}
@@ -45,10 +45,10 @@ export default function Scene() {
 
       <EffectComposer>
         <Bloom
-          intensity={glowIntensity * 1.2}
-          luminanceThreshold={0.2}
-          luminanceSmoothing={0.8}
-          radius={0.8}
+          intensity={glowIntensity * 1.8}
+          luminanceThreshold={0.1}
+          luminanceSmoothing={0.9}
+          radius={0.85}
         />
       </EffectComposer>
     </Canvas>

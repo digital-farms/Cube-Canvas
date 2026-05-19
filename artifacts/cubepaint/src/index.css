@@ -254,6 +254,10 @@ html, body, #root {
   letter-spacing: 0.1em;
 }
 
+.region-badge {
+  background: linear-gradient(135deg, #ff40a0, #8040ff);
+}
+
 .color-label {
   max-width: 90px;
   overflow: hidden;

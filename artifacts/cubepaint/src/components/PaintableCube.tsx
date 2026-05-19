@@ -17,6 +17,43 @@ const FACE_CONFIGS = [
 const UNPAINTED = new THREE.Color(DEFAULT_TILE_COLOR);
 const HOVER_CLR = new THREE.Color("#ffffff");
 
+function getNeighbors(id: number, N: number): number[] {
+  const face = Math.floor(id / (N * N));
+  const local = id % (N * N);
+  const row = Math.floor(local / N);
+  const col = local % N;
+  const base = face * N * N;
+  const result: number[] = [];
+  if (row > 0) result.push(base + (row - 1) * N + col);
+  if (row < N - 1) result.push(base + (row + 1) * N + col);
+  if (col > 0) result.push(base + row * N + (col - 1));
+  if (col < N - 1) result.push(base + row * N + (col + 1));
+  return result;
+}
+
+function getConnectedRegion(
+  startId: number,
+  targetColor: string,
+  tileColors: Record<number, string>,
+  N: number
+): number[] {
+  const visited = new Set<number>();
+  const queue = [startId];
+  const result: number[] = [];
+  while (queue.length > 0) {
+    const curr = queue.shift()!;
+    if (visited.has(curr)) continue;
+    visited.add(curr);
+    const c = tileColors[curr] ?? DEFAULT_TILE_COLOR;
+    if (c !== targetColor) continue;
+    result.push(curr);
+    for (const n of getNeighbors(curr, N)) {
+      if (!visited.has(n)) queue.push(n);
+    }
+  }
+  return result;
+}
+
 interface PopAnim {
   id: number;
   t: number;
@@ -24,7 +61,6 @@ interface PopAnim {
 
 export default function PaintableCube() {
   const meshRef = useRef<THREE.InstancedMesh>(null!);
-  const coreMeshRef = useRef<THREE.Mesh>(null!);
   const { camera, gl } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const pointer = useMemo(() => new THREE.Vector2(), []);
@@ -37,9 +73,11 @@ export default function PaintableCube() {
   const lastPainted = useRef(-1);
   const pointerDown = useRef(false);
   const pointerMoved = useRef(false);
+  const glowUniformRef = useRef<{ value: number }>({ value: 0.6 });
 
   const {
-    gridSize, tileColors, paintTile, fillMode, glowIntensity, autoRotate,
+    gridSize, tileColors, paintTile, paintRegion, fillMode,
+    regionPaintMode, glowIntensity, autoRotate,
   } = useGameStore();
 
   const totalTiles = 6 * gridSize * gridSize;
@@ -49,7 +87,6 @@ export default function PaintableCube() {
     const step = 1 / N;
     const tileSize = step * 0.88;
     const matrices: THREE.Matrix4[] = [];
-
     for (let face = 0; face < 6; face++) {
       const cfg = FACE_CONFIGS[face];
       for (let row = 0; row < N; row++) {
@@ -69,6 +106,32 @@ export default function PaintableCube() {
     }
     return matrices;
   }, [gridSize, dummy]);
+
+  // Material with per-instance emissive glow via shader injection
+  const material = useMemo(() => {
+    const mat = new THREE.MeshStandardMaterial({
+      roughness: 0.25,
+      metalness: 0.1,
+      vertexColors: true,
+    });
+
+    const glowRef = glowUniformRef.current;
+
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.glowStrength = glowRef;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <emissivemap_fragment>",
+        `#include <emissivemap_fragment>
+         totalEmissiveRadiance += vColor.rgb * glowStrength;`
+      );
+    };
+
+    return mat;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    glowUniformRef.current.value = glowIntensity * 0.8;
+  }, [glowIntensity]);
 
   useEffect(() => {
     if (!meshRef.current) return;
@@ -92,6 +155,9 @@ export default function PaintableCube() {
   }, [tileColors, totalTiles, tempColor]);
 
   const groupRef = useRef<THREE.Group>(null!);
+  // Separate target rotation and current rotation for smooth interpolation
+  const targetRot = useRef({ x: 0.3, y: 0.5 });
+  const currentRot = useRef({ x: 0.3, y: 0.5 });
   const rotVel = useRef({ x: 0, y: 0 });
   const lastPointer = useRef({ x: 0, y: 0 });
 
@@ -115,12 +181,26 @@ export default function PaintableCube() {
     (id: number) => {
       if (id < 0 || id === lastPainted.current) return;
       lastPainted.current = id;
-      paintTile(id);
-      playPaintSound(useGameStore.getState().getNextColor());
-      triggerHaptic();
-      popAnims.current.set(id, { id, t: 0 });
+
+      const state = useGameStore.getState();
+
+      if (state.regionPaintMode) {
+        const tileColor = state.tileColors[id] ?? DEFAULT_TILE_COLOR;
+        const region = getConnectedRegion(id, tileColor, state.tileColors, state.gridSize);
+        if (region.length > 0) {
+          paintRegion(region);
+          playPaintSound(state.getNextColor());
+          triggerHaptic();
+          region.forEach((rid) => popAnims.current.set(rid, { id: rid, t: 0 }));
+        }
+      } else {
+        paintTile(id);
+        playPaintSound(state.getNextColor());
+        triggerHaptic();
+        popAnims.current.set(id, { id, t: 0 });
+      }
     },
-    [paintTile]
+    [paintTile, paintRegion]
   );
 
   useEffect(() => {
@@ -142,12 +222,17 @@ export default function PaintableCube() {
       const dx = e.clientX - lastPointer.current.x;
       const dy = e.clientY - lastPointer.current.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 3) pointerMoved.current = true;
+      if (dist > 4) pointerMoved.current = true;
 
       if (pointerMoved.current) {
         isDragging.current = true;
-        rotVel.current.y += dx * 0.004;
-        rotVel.current.x += dy * 0.004;
+        // Gentle sensitivity + velocity clamping for smooth rotation
+        const sensitivity = 0.0018;
+        rotVel.current.y += dx * sensitivity;
+        rotVel.current.x += dy * sensitivity;
+        const maxVel = 0.035;
+        rotVel.current.x = Math.max(-maxVel, Math.min(maxVel, rotVel.current.x));
+        rotVel.current.y = Math.max(-maxVel, Math.min(maxVel, rotVel.current.y));
         lastPointer.current = { x: e.clientX, y: e.clientY };
       }
 
@@ -188,28 +273,40 @@ export default function PaintableCube() {
   useFrame((_, delta) => {
     if (!groupRef.current || !meshRef.current) return;
 
+    // Auto-rotate: gentle continuous velocity
     if (autoRotate && !isDragging.current) {
-      rotVel.current.y += 0.003;
+      rotVel.current.y += 0.0015;
     }
 
-    groupRef.current.rotation.y += rotVel.current.y;
-    groupRef.current.rotation.x += rotVel.current.x;
-    groupRef.current.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, groupRef.current.rotation.x));
+    // Apply velocity to target rotation
+    targetRot.current.y += rotVel.current.y;
+    targetRot.current.x += rotVel.current.x;
+    targetRot.current.x = Math.max(-1.4, Math.min(1.4, targetRot.current.x));
 
-    rotVel.current.x *= 0.92;
-    rotVel.current.y *= 0.92;
+    // Smooth inertia decay — higher value = longer glide
+    const decay = isDragging.current ? 0.7 : 0.94;
+    rotVel.current.x *= decay;
+    rotVel.current.y *= decay;
 
+    // Smooth interpolation from current to target (feel of weight/inertia)
+    const lerp = Math.min(1, 12 * delta);
+    currentRot.current.x += (targetRot.current.x - currentRot.current.x) * lerp;
+    currentRot.current.y += (targetRot.current.y - currentRot.current.y) * lerp;
+
+    groupRef.current.rotation.x = currentRot.current.x;
+    groupRef.current.rotation.y = currentRot.current.y;
+
+    // Pop animations
     let needsMatrixUpdate = false;
-
     popAnims.current.forEach((anim, id) => {
-      anim.t += delta * 8;
+      anim.t += delta * 7;
       if (anim.t >= 1) {
         meshRef.current.setMatrixAt(id, baseMatrices[id]);
         popAnims.current.delete(id);
         needsMatrixUpdate = true;
         return;
       }
-      const scale = 1 + Math.sin(anim.t * Math.PI) * 0.15;
+      const scale = 1 + Math.sin(anim.t * Math.PI) * 0.18;
       const m = baseMatrices[id].clone();
       const pos = new THREE.Vector3();
       const rot = new THREE.Quaternion();
@@ -221,6 +318,7 @@ export default function PaintableCube() {
       needsMatrixUpdate = true;
     });
 
+    // Hover highlight
     if (hoveredId >= 0) {
       const m = baseMatrices[hoveredId]?.clone();
       if (m) {
@@ -228,13 +326,15 @@ export default function PaintableCube() {
         const rot = new THREE.Quaternion();
         const scl = new THREE.Vector3();
         m.decompose(pos, rot, scl);
-        scl.multiplyScalar(1.08);
+        scl.multiplyScalar(1.1);
         m.compose(pos, rot, scl);
         meshRef.current.setMatrixAt(hoveredId, m);
         const paintedColor = tileColors[hoveredId];
         meshRef.current.setColorAt(
           hoveredId,
-          paintedColor ? tempColor.set(paintedColor).lerp(HOVER_CLR, 0.3) : HOVER_CLR.clone().multiplyScalar(0.4)
+          paintedColor
+            ? tempColor.set(paintedColor).lerp(HOVER_CLR, 0.4)
+            : HOVER_CLR.clone().multiplyScalar(0.35)
         );
         needsMatrixUpdate = true;
         if (meshRef.current.instanceColor) meshRef.current.instanceColor.needsUpdate = true;
@@ -247,35 +347,18 @@ export default function PaintableCube() {
   });
 
   const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
-  const material = useMemo(
-    () =>
-      new THREE.MeshStandardMaterial({
-        roughness: 0.2,
-        metalness: 0.1,
-        envMapIntensity: 0.5,
-        emissiveIntensity: glowIntensity,
-      }),
-    [glowIntensity]
-  );
-
-  useEffect(() => {
-    material.emissiveIntensity = glowIntensity * 0.4;
-    material.needsUpdate = true;
-  }, [glowIntensity, material]);
 
   return (
     <group ref={groupRef} rotation={[0.3, 0.5, 0]}>
-      <mesh ref={coreMeshRef} renderOrder={-1}>
+      <mesh renderOrder={-1}>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color="#0a0a1a" roughness={0.8} metalness={0.2} />
+        <meshStandardMaterial color="#080818" roughness={0.9} metalness={0.1} />
       </mesh>
       <instancedMesh
         ref={meshRef}
         args={[geometry, material, totalTiles]}
         frustumCulled={false}
-      >
-        <planeGeometry args={[1, 1]} />
-      </instancedMesh>
+      />
     </group>
   );
 }

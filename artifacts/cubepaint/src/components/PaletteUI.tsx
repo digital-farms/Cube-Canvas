@@ -7,6 +7,7 @@ export default function PaletteUI() {
   const {
     selectedColor, setSelectedColor, paletteName, setPalette,
     fillMode, setFillMode, randomColorMode, setRandomColorMode,
+    regionPaintMode, setRegionPaintMode, preFill,
     setShowSettings, showSettings,
   } = useGameStore();
 
@@ -26,7 +27,7 @@ export default function PaletteUI() {
     <div className="palette-ui">
       {showPalettePicker && (
         <div className="palette-popup">
-          <div className="palette-popup-title">Choose Palette</div>
+          <div className="palette-popup-title">Выбрать палитру</div>
           {paletteNames.map((name) => (
             <button
               key={name}
@@ -48,6 +49,7 @@ export default function PaletteUI() {
       )}
 
       <div className="palette-bar">
+        {/* Palette switcher */}
         <button
           className="palette-palette-btn"
           onClick={() => {
@@ -55,7 +57,7 @@ export default function PaletteUI() {
             setShowPalettePicker((v) => !v);
             setShowColorPicker(false);
           }}
-          title="Switch palette"
+          title="Сменить палитру"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" />
@@ -65,6 +67,7 @@ export default function PaletteUI() {
           </svg>
         </button>
 
+        {/* Color swatches */}
         <div className="palette-colors">
           {palette.map((color) => (
             <button
@@ -80,7 +83,7 @@ export default function PaletteUI() {
           <button
             className={`color-swatch custom-color ${showColorPicker ? "selected" : ""}`}
             onClick={() => setShowColorPicker((v) => !v)}
-            title="Custom color"
+            title="Свой цвет"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -101,14 +104,50 @@ export default function PaletteUI() {
           )}
         </div>
 
+        {/* Action buttons */}
         <div className="palette-actions">
+          {/* Pre-fill cube */}
+          <button
+            className="action-btn"
+            onClick={() => {
+              startAmbientMusic();
+              preFill();
+            }}
+            title="Случайное заполнение куба"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+          </button>
+
+          {/* Region paint mode */}
+          <button
+            className={`action-btn ${regionPaintMode ? "active" : ""}`}
+            onClick={() => {
+              startAmbientMusic();
+              setRegionPaintMode(!regionPaintMode);
+              if (!regionPaintMode) {
+                setFillMode(false);
+              }
+            }}
+            title="Закраска региона одним касанием"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H19c.55 0 1-.45 1-1s-.45-1-1-1z" />
+            </svg>
+          </button>
+
+          {/* Random color */}
           <button
             className={`action-btn ${randomColorMode ? "active" : ""}`}
             onClick={() => {
               startAmbientMusic();
               setRandomColorMode(!randomColorMode);
             }}
-            title="Random color mode"
+            title="Случайный цвет"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="16 3 21 3 21 8" />
@@ -118,24 +157,27 @@ export default function PaletteUI() {
             </svg>
           </button>
 
+          {/* Fill drag mode */}
           <button
             className={`action-btn ${fillMode ? "active" : ""}`}
             onClick={() => {
               startAmbientMusic();
               setFillMode(!fillMode);
+              if (!fillMode) setRegionPaintMode(false);
             }}
-            title="Fill mode"
+            title="Рисовать при перемещении"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 11l11-7 7 4v8l-7 4-11-7z" />
-              <path d="M14 4l4 2-11 7" />
+              <path d="M18 3a3 3 0 0 0-3 3l-7 7 2 2 7-7a3 3 0 0 0 3-3V3z" />
+              <path d="M5 12L3 21l9-2" />
             </svg>
           </button>
 
+          {/* Settings */}
           <button
             className={`action-btn ${showSettings ? "active" : ""}`}
             onClick={() => setShowSettings(!showSettings)}
-            title="Settings"
+            title="Настройки"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="3" />
@@ -146,11 +188,19 @@ export default function PaletteUI() {
       </div>
 
       <div className="selected-color-preview">
-        <div className="color-indicator" style={{ background: randomColorMode ? "linear-gradient(135deg, #ff0080, #00ffff, #ff8800)" : selectedColor }} />
+        <div
+          className="color-indicator"
+          style={{
+            background: randomColorMode
+              ? "linear-gradient(135deg, #ff0080, #00ffff, #ff8800)"
+              : selectedColor,
+          }}
+        />
         <span className="color-label">
           {randomColorMode ? "RANDOM" : selectedColor.toUpperCase()}
         </span>
-        {fillMode && <span className="mode-badge">FILL</span>}
+        {regionPaintMode && <span className="mode-badge region-badge">РЕГИОН</span>}
+        {fillMode && !regionPaintMode && <span className="mode-badge">FILL</span>}
       </div>
     </div>
   );
