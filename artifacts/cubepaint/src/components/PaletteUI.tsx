@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useGameStore } from "../store/gameStore";
 import { PALETTES, PALETTE_LABELS, PaletteName } from "../utils/colors";
-import { playPaletteSound } from "../utils/audio";
+import { playPaletteSound, unlockAudio, getAudioState } from "../utils/audio";
 
 export default function PaletteUI() {
   const {
@@ -11,6 +11,13 @@ export default function PaletteUI() {
 
   const [showPicker, setShowPicker] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
+  const [audioState, setAudioState] = useState(getAudioState);
+
+  const handleSoundToggle = useCallback(() => {
+    unlockAudio()
+      .then(() => setAudioState("running"))
+      .catch(() => setAudioState(getAudioState()));
+  }, []);
 
   const palette = PALETTES[paletteName as PaletteName];
   const paletteNames = Object.keys(PALETTES) as PaletteName[];
@@ -51,6 +58,15 @@ export default function PaletteUI() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
             <path d="M19 12H5M12 5l-7 7 7 7" />
           </svg>
+        </button>
+
+        {/* Sound toggle — explicit unlock for iOS */}
+        <button
+          className={`palette-palette-btn sound-btn ${audioState === "running" ? "sound-on" : "sound-off"}`}
+          title={audioState === "running" ? "Звук включён" : "Включить звук"}
+          onClick={handleSoundToggle}
+        >
+          {audioState === "running" ? "🔊" : "🔇"}
         </button>
 
         {/* Palette switcher */}
