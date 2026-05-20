@@ -1,17 +1,21 @@
-// ─── AudioContext management ────────────────────────────────────────────────
+// ─── iOS Safari / Chrome-on-iOS notes ───────────────────────────────────────
 //
-// iOS Safari is the strictest browser for Web Audio:
-//   1. AudioContext must be created AND unlocked during a user gesture.
-//   2. Even then, it can start "suspended" on older iOS.
-//   3. A silent buffer start + resume() call is required to fully unlock it.
-//
-// Rule: NEVER call getCtx() outside a user-gesture handler.
-// All exported play* functions + startAmbientMusic must be called from clicks/taps.
+// iOS rules for Web Audio:
+//  1. AudioContext must be created AND resumed inside a synchronous user-gesture
+//     handler (click / touchend). React's onClick satisfies this.
+//  2. After resume(), the context may still be "suspended" for a short time.
+//     Scheduling notes at currentTime + X while suspended → X is in the past
+//     when the context finally starts running → notes are silently dropped.
+//  3. Solution: call whenRunning() which waits for "running" state via
+//     statechange event, then schedules with currentTime + small safe offset.
+//  4. After the first unlock, audio can play from any callback (no gesture
+//     required) as long as the context stays running.
 
 let ctx: AudioContext | null = null;
 let masterGain: GainNode | null = null;
 let ambientStarted = false;
-let ctxUnlocked = false;
+
+// ─── Context management ──────────────────────────────────────────────────────
 
 function getCtx(): AudioContext {
   if (!ctx) {
@@ -23,18 +27,20 @@ function getCtx(): AudioContext {
   return ctx;
 }
 
+function out(): GainNode {
+  return masterGain!;
+}
+
 /**
- * Must be called synchronously inside a user-gesture handler (click/touchstart).
- * Creates and unlocks the AudioContext for iOS Safari.
+ * Call synchronously from a user-gesture handler.
+ * Resumes the context and plays a 1-sample silent buffer — the canonical iOS
+ * unlock. After this, iOS allows further audio even outside gesture handlers.
  */
 function unlock(): void {
   const audioCtx = getCtx();
-  if (ctxUnlocked && audioCtx.state === "running") return;
+  audioCtx.resume().catch(() => {});
 
-  // Step 1: call resume() — iOS needs this even if state looks "running"
-  audioCtx.resume().catch(() => {/* noop */});
-
-  // Step 2: play a 1-sample silent buffer — the canonical iOS unlock trick
+  // Silent buffer: required for iOS Safari to fully unlock the context
   try {
     const buf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
     const src = audioCtx.createBufferSource();
@@ -42,38 +48,41 @@ function unlock(): void {
     src.connect(audioCtx.destination);
     src.start(0);
   } catch { /* noop */ }
-
-  ctxUnlocked = true;
 }
 
-function out(): GainNode {
-  getCtx();
-  return masterGain!;
-}
+/**
+ * Runs `fn` as soon as the AudioContext is in "running" state.
+ * If it's already running, calls immediately. Otherwise waits for
+ * statechange (with a 300ms timeout fallback).
+ */
+function whenRunning(fn: () => void): void {
+  const audioCtx = getCtx();
 
-// Safe start time: a small offset so notes schedule after context is running
-function now(): number {
-  return getCtx().currentTime + 0.04;
-}
+  if (audioCtx.state === "running") {
+    fn();
+    return;
+  }
 
-// ─── Reverb / room tail ─────────────────────────────────────────────────────
+  let done = false;
 
-function createReverb(audioCtx: AudioContext, dest: AudioNode): GainNode {
-  const wet = audioCtx.createGain();
-  wet.gain.setValueAtTime(0.18, audioCtx.currentTime);
-  const d1 = audioCtx.createDelay(0.5);
-  d1.delayTime.setValueAtTime(0.08, audioCtx.currentTime);
-  const d2 = audioCtx.createDelay(0.5);
-  d2.delayTime.setValueAtTime(0.15, audioCtx.currentTime);
-  const fb = audioCtx.createGain();
-  fb.gain.setValueAtTime(0.22, audioCtx.currentTime);
-  wet.connect(d1);
-  wet.connect(d2);
-  d1.connect(fb);
-  d2.connect(fb);
-  fb.connect(d1);
-  fb.connect(dest);
-  return wet;
+  const handler = () => {
+    if (done) return;
+    if (audioCtx.state === "running") {
+      done = true;
+      audioCtx.removeEventListener("statechange", handler);
+      fn();
+    }
+  };
+
+  audioCtx.addEventListener("statechange", handler);
+
+  // Fallback: if statechange never fires but context is running within 500ms
+  setTimeout(() => {
+    if (done) return;
+    done = true;
+    audioCtx.removeEventListener("statechange", handler);
+    if (audioCtx.state === "running") fn();
+  }, 500);
 }
 
 // ─── Pentatonic scale ────────────────────────────────────────────────────────
@@ -83,107 +92,120 @@ function pickNote(seed: number): number {
   return PENTATONIC[Math.abs(seed) % PENTATONIC.length];
 }
 
-// ─── Low-level tone synthesiser ─────────────────────────────────────────────
+// ─── Low-level synth ─────────────────────────────────────────────────────────
 
-function crystalNote(freq: number, vol: number, decay: number, t: number): void {
-  const audioCtx = getCtx();
+function crystalNote(audioCtx: AudioContext, freq: number, vol: number, decay: number, tOffset: number): void {
+  const t = audioCtx.currentTime + tOffset;
+
   const g = audioCtx.createGain();
   g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(vol, t + 0.01);
+  g.gain.linearRampToValueAtTime(vol, t + 0.012);
   g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
 
   const o1 = audioCtx.createOscillator();
   o1.type = "sine";
   o1.frequency.setValueAtTime(freq, t);
-  o1.frequency.exponentialRampToValueAtTime(freq * 0.97, t + decay);
+  o1.frequency.exponentialRampToValueAtTime(freq * 0.972, t + decay);
 
   const o2 = audioCtx.createOscillator();
   o2.type = "triangle";
   o2.frequency.setValueAtTime(freq * 2.01, t);
   const g2 = audioCtx.createGain();
-  g2.gain.setValueAtTime(vol * 0.28, t);
-  g2.gain.exponentialRampToValueAtTime(0.0001, t + decay * 0.45);
+  g2.gain.setValueAtTime(vol * 0.25, t);
+  g2.gain.exponentialRampToValueAtTime(0.0001, t + decay * 0.4);
+
+  // Simple 1-tap delay for room feel (no feedback loop — safer on mobile)
+  const delay = audioCtx.createDelay(0.5);
+  delay.delayTime.setValueAtTime(0.11, t);
+  const delayGain = audioCtx.createGain();
+  delayGain.gain.setValueAtTime(0.14, t);
 
   const filter = audioCtx.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.setValueAtTime(4000, t);
-  filter.Q.setValueAtTime(0.5, t);
-
-  const reverb = createReverb(audioCtx, out());
+  filter.frequency.setValueAtTime(5000, t);
 
   o1.connect(filter);
   o2.connect(g2);
   g2.connect(filter);
   filter.connect(g);
   g.connect(out());
-  g.connect(reverb);
+  g.connect(delay);
+  delay.connect(delayGain);
+  delayGain.connect(out());
 
   o1.start(t);
   o2.start(t);
-  o1.stop(t + decay + 0.15);
-  o2.stop(t + decay + 0.15);
+  o1.stop(t + decay + 0.2);
+  o2.stop(t + decay + 0.2);
 }
 
-// ─── Public play functions ───────────────────────────────────────────────────
+// ─── Public API ───────────────────────────────────────────────────────────────
 
-/** Soft single-tile paint sound. Must be called from a user-gesture handler. */
+/** Single tile paint — ASMR crystal tap. Call from pointer/touch handler. */
 export function playPaintSound(color: string): void {
   try {
     unlock();
-    const t = now();
     const hash = parseInt(color.replace("#", "").slice(0, 2), 16);
     const freq = pickNote(hash);
-    crystalNote(freq, 0.12, 0.6, t);
-  } catch { /* silent fail */ }
+    whenRunning(() => {
+      crystalNote(getCtx(), freq, 0.13, 0.65, 0.02);
+    });
+  } catch { /* noop */ }
 }
 
-/** Satisfying cascade for region fill. Must be called from a user-gesture handler. */
+/** Region fill cascade. Call from pointer/touch handler. */
 export function playRegionFillSound(regionSize: number): void {
   try {
     unlock();
-    const t = now();
     const steps = Math.min(regionSize, 9);
-    for (let i = 0; i < steps; i++) {
-      const freq = PENTATONIC[i % PENTATONIC.length];
-      crystalNote(freq, 0.1 - i * 0.008, 0.65, t + i * 0.05);
-    }
-  } catch { /* silent fail */ }
+    whenRunning(() => {
+      const audioCtx = getCtx();
+      for (let i = 0; i < steps; i++) {
+        crystalNote(audioCtx, PENTATONIC[i % PENTATONIC.length], 0.11 - i * 0.008, 0.7, 0.02 + i * 0.05);
+      }
+    });
+  } catch { /* noop */ }
 }
 
-/** Welcome chime when entering a mode. */
+/** Welcome chime on mode select. Call from click handler. */
 export function playMenuChime(): void {
   try {
     unlock();
-    const t = now();
-    [392.0, 493.88, 587.33, 783.99].forEach((freq, i) => {
-      crystalNote(freq, 0.13, 1.1, t + i * 0.12);
+    whenRunning(() => {
+      const audioCtx = getCtx();
+      [392.0, 493.88, 587.33, 783.99].forEach((freq, i) => {
+        crystalNote(audioCtx, freq, 0.14, 1.2, 0.02 + i * 0.13);
+      });
     });
-  } catch { /* silent fail */ }
+  } catch { /* noop */ }
 }
 
-/** Gentle palette switch sound. */
+/** Palette switch sound. */
 export function playPaletteSound(): void {
   try {
     unlock();
-    const t = now();
-    crystalNote(523.25, 0.1, 0.45, t);
-    crystalNote(659.25, 0.08, 0.4, t + 0.08);
-  } catch { /* silent fail */ }
+    whenRunning(() => {
+      const audioCtx = getCtx();
+      crystalNote(audioCtx, 523.25, 0.11, 0.5, 0.02);
+      crystalNote(audioCtx, 659.25, 0.09, 0.45, 0.1);
+    });
+  } catch { /* noop */ }
 }
 
-/** Subtle rotation whisper (noise burst). */
+/** Subtle rotation whisper — only plays if context already running. */
 let lastRotSound = 0;
 export function playRotateSound(): void {
   try {
     const ms = Date.now();
     if (ms - lastRotSound < 350) return;
     lastRotSound = ms;
-    if (!ctxUnlocked) return; // don't create context for rotation alone
-    const audioCtx = getCtx();
+    if (!ctx || ctx.state !== "running") return;
+    const audioCtx = ctx;
     const t = audioCtx.currentTime + 0.02;
-    const buf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * 0.09), audioCtx.sampleRate);
+    const sampleLen = Math.floor(audioCtx.sampleRate * 0.09);
+    const buf = audioCtx.createBuffer(1, sampleLen, audioCtx.sampleRate);
     const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+    for (let i = 0; i < sampleLen; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
     const src = audioCtx.createBufferSource();
     src.buffer = buf;
     const filter = audioCtx.createBiquadFilter();
@@ -199,7 +221,7 @@ export function playRotateSound(): void {
     g.connect(out());
     src.start(t);
     src.stop(t + 0.12);
-  } catch { /* silent fail */ }
+  } catch { /* noop */ }
 }
 
 // ─── Ambient drone ───────────────────────────────────────────────────────────
@@ -209,7 +231,7 @@ function launchDrones(audioCtx: AudioContext): void {
 
   const ambGain = audioCtx.createGain();
   ambGain.gain.setValueAtTime(0, t);
-  ambGain.gain.linearRampToValueAtTime(0.05, t + 4);
+  ambGain.gain.linearRampToValueAtTime(0.055, t + 5);
   ambGain.connect(out());
 
   const dronePairs: [number, number][] = [
@@ -258,7 +280,7 @@ function launchDrones(audioCtx: AudioContext): void {
     osc.type = "sine";
     osc.frequency.setValueAtTime(freq, t);
     const g = audioCtx.createGain();
-    g.gain.setValueAtTime(0.024 - i * 0.006, t);
+    g.gain.setValueAtTime(0.026 - i * 0.006, t);
     const lfo = audioCtx.createOscillator();
     lfo.type = "sine";
     lfo.frequency.setValueAtTime(0.04 + i * 0.02, t);
@@ -273,23 +295,13 @@ function launchDrones(audioCtx: AudioContext): void {
   });
 }
 
-/**
- * Deep ambient drone. Must be called from a user-gesture handler.
- * Waits for AudioContext to be fully running before launching oscillators.
- */
+/** Meditative ambient pads. Must be called from a user-gesture handler. */
 export function startAmbientMusic(): void {
   if (ambientStarted) return;
   ambientStarted = true;
   try {
     unlock();
-    const audioCtx = getCtx();
-    if (audioCtx.state === "running") {
-      launchDrones(audioCtx);
-    } else {
-      audioCtx.resume()
-        .then(() => launchDrones(audioCtx))
-        .catch(() => { ambientStarted = false; });
-    }
+    whenRunning(() => launchDrones(getCtx()));
   } catch { ambientStarted = false; }
 }
 
