@@ -559,6 +559,31 @@ html, body, #root {
   color: var(--text-dim);
 }
 
+/* ── Paint Flash ── */
+.paint-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  opacity: 0;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 40%,
+    var(--pf-color, #8000ff) 130%
+  );
+  mix-blend-mode: screen;
+}
+
+.paint-flash.pf-active {
+  animation: pfAnim 0.65s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes pfAnim {
+  0%   { opacity: 0.55; }
+  30%  { opacity: 0.38; }
+  100% { opacity: 0; }
+}
+
 /* ── WebGL Fallback ── */
 .webgl-fallback {
   width: 100%;

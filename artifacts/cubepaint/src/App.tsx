@@ -4,6 +4,7 @@ import Scene from "./components/Scene";
 import PaletteUI from "./components/PaletteUI";
 import SettingsPanel from "./components/SettingsPanel";
 import ModeSelectScreen from "./components/ModeSelectScreen";
+import PaintFlash from "./components/PaintFlash";
 import { isWebGLAvailable } from "./utils/webgl";
 import "./index.css";
 
@@ -53,6 +54,7 @@ function App() {
             <Scene />
           </div>
 
+          <PaintFlash />
           <SettingsPanel />
           <PaletteUI />
         </>
