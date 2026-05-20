@@ -3,7 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useGameStore } from "../store/gameStore";
 import { DEFAULT_TILE_COLOR } from "../utils/colors";
-import { playPaintSound, triggerHaptic } from "../utils/audio";
+import { playPaintSound, playRegionFillSound, triggerHaptic } from "../utils/audio";
 
 const FACE_CONFIGS = [
   { center: [0, 0, 0.5002] as const, euler: [0, 0, 0] as const, right: [1, 0, 0] as const, up: [0, 1, 0] as const },
@@ -79,7 +79,7 @@ export default function PaintableCube() {
   const currentRot = useRef({ x: 0.3, y: 0.5 });
   const rotVel = useRef({ x: 0, y: 0 });
 
-  const { gridSize, tileColors, paintTile, paintRegion, fillMode, regionPaintMode, glowIntensity, autoRotate } =
+  const { gridSize, tileColors, paintTile, paintRegion, gameMode, glowIntensity, autoRotate } =
     useGameStore();
   const N = gridSize;
   const totalTiles = 6 * N * N;
@@ -197,18 +197,18 @@ export default function PaintableCube() {
       lastPainted.current = id;
       const state = useGameStore.getState();
 
-      if (state.regionPaintMode) {
+      if (state.gameMode === "repaint") {
         const tileColor = state.tileColors[id] ?? DEFAULT_TILE_COLOR;
         const region = getConnectedRegion(id, tileColor, state.tileColors, state.gridSize);
         if (region.length > 0) {
           paintRegion(region);
-          playPaintSound(state.getNextColor());
+          playRegionFillSound(region.length);
           triggerHaptic();
           region.forEach((rid) => popAnims.current.set(rid, { id: rid, t: 0 }));
         }
       } else {
         paintTile(id);
-        playPaintSound(state.getNextColor());
+        playPaintSound(state.selectedColor);
         triggerHaptic();
         popAnims.current.set(id, { id, t: 0 });
       }
@@ -247,7 +247,7 @@ export default function PaintableCube() {
         lastPointer.current = { x: e.clientX, y: e.clientY };
       }
 
-      if (fillMode && isDragging.current) {
+      if (useGameStore.getState().gameMode === "draw" && isDragging.current) {
         doPaint(pickInstance(e.clientX, e.clientY));
       }
     };
@@ -278,7 +278,7 @@ export default function PaintableCube() {
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointerleave", onLeave);
     };
-  }, [gl, pickInstance, doPaint, fillMode]);
+  }, [gl, pickInstance, doPaint]);
 
   useFrame((_, delta) => {
     if (!groupRef.current || !tilesRef.current) return;

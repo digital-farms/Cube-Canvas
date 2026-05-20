@@ -1,7 +1,9 @@
 import { useMemo } from "react";
+import { useGameStore } from "./store/gameStore";
 import Scene from "./components/Scene";
 import PaletteUI from "./components/PaletteUI";
 import SettingsPanel from "./components/SettingsPanel";
+import ModeSelectScreen from "./components/ModeSelectScreen";
 import { isWebGLAvailable } from "./utils/webgl";
 import "./index.css";
 
@@ -17,8 +19,7 @@ function WebGLFallback() {
         </div>
         <h2>WebGL Required</h2>
         <p>
-          CubePaint needs WebGL to render the 3D cube.
-          Please open this app in a modern browser on your phone or desktop.
+          CubePaint требует WebGL. Откройте приложение в браузере на телефоне или компьютере.
         </p>
       </div>
     </div>
@@ -27,23 +28,31 @@ function WebGLFallback() {
 
 function App() {
   const webglOk = useMemo(() => isWebGLAvailable(), []);
+  const gameMode = useGameStore((s) => s.gameMode);
+  const paintCount = useGameStore((s) => s.paintCount);
+
+  if (!webglOk) return <WebGLFallback />;
 
   return (
     <div className="app-root">
-      <header className="app-header">
-        <div className="app-logo">
-          <span className="logo-cube">⬛</span>
-          <span className="logo-text">CubePaint</span>
-        </div>
-        <div className="app-hint">Drag to rotate · Tap to paint</div>
-      </header>
+      {gameMode === null && <ModeSelectScreen />}
 
-      <div className="canvas-container">
-        {webglOk ? <Scene /> : <WebGLFallback />}
-      </div>
-
-      {webglOk && (
+      {gameMode !== null && (
         <>
+          <header className="app-header">
+            <div className="app-logo">
+              <span className="logo-cube">⬛</span>
+              <span className="logo-text">CubePaint</span>
+            </div>
+            <div className="app-hint">
+              {gameMode === "draw" ? `${paintCount} клеток` : "Касание — регион"}
+            </div>
+          </header>
+
+          <div className="canvas-container">
+            <Scene />
+          </div>
+
           <SettingsPanel />
           <PaletteUI />
         </>

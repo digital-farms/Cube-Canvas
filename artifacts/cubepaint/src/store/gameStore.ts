@@ -3,29 +3,27 @@ import { PALETTES } from "../utils/colors";
 
 export type GridSize = 10 | 20 | 40;
 export type PaletteName = keyof typeof PALETTES;
+export type GameMode = "draw" | "repaint" | null;
 
 interface GameState {
+  gameMode: GameMode;
   gridSize: GridSize;
   tileColors: Record<number, string>;
   selectedColor: string;
   paletteName: PaletteName;
-  fillMode: boolean;
-  randomColorMode: boolean;
-  regionPaintMode: boolean;
   glowIntensity: number;
   autoRotate: boolean;
   showSettings: boolean;
   paintCount: number;
 
-  setGridSize: (size: GridSize) => void;
+  startGame: (mode: "draw" | "repaint") => void;
+  backToMenu: () => void;
   paintTile: (instanceId: number) => void;
   paintRegion: (ids: number[]) => void;
   preFill: () => void;
   setSelectedColor: (color: string) => void;
   setPalette: (name: PaletteName) => void;
-  setFillMode: (v: boolean) => void;
-  setRandomColorMode: (v: boolean) => void;
-  setRegionPaintMode: (v: boolean) => void;
+  setGridSize: (size: GridSize) => void;
   setGlowIntensity: (v: number) => void;
   setAutoRotate: (v: boolean) => void;
   setShowSettings: (v: boolean) => void;
@@ -33,76 +31,100 @@ interface GameState {
   getNextColor: () => string;
 }
 
+function buildPreFill(gridSize: GridSize, paletteName: PaletteName): Record<number, string> {
+  const palette = PALETTES[paletteName];
+  const total = 6 * gridSize * gridSize;
+  const colors: Record<number, string> = {};
+  for (let i = 0; i < total; i++) {
+    colors[i] = palette[Math.floor(Math.random() * palette.length)];
+  }
+  return colors;
+}
+
 export const useGameStore = create<GameState>((set, get) => ({
+  gameMode: null,
   gridSize: 10,
   tileColors: {},
   selectedColor: PALETTES.neon[0],
   paletteName: "neon",
-  fillMode: false,
-  randomColorMode: false,
-  regionPaintMode: false,
-  glowIntensity: 0.6,
+  glowIntensity: 0.65,
   autoRotate: false,
   showSettings: false,
   paintCount: 0,
 
-  setGridSize: (size) => set({ gridSize: size, tileColors: {}, paintCount: 0 }),
+  startGame: (mode) => {
+    const { gridSize, paletteName } = get();
+    if (mode === "repaint") {
+      const colors = buildPreFill(gridSize, paletteName);
+      set({ gameMode: mode, tileColors: colors, paintCount: Object.keys(colors).length });
+    } else {
+      set({ gameMode: mode, tileColors: {}, paintCount: 0 });
+    }
+  },
 
-  paintTile: (instanceId) => {
-    const { randomColorMode, selectedColor, paletteName, tileColors } = get();
-    const palette = PALETTES[paletteName];
-    const color = randomColorMode
-      ? palette[Math.floor(Math.random() * palette.length)]
-      : selectedColor;
-    if (tileColors[instanceId] === color) return;
-    set((state) => ({
-      tileColors: { ...state.tileColors, [instanceId]: color },
-      paintCount: state.paintCount + 1,
+  backToMenu: () => set({ gameMode: null, tileColors: {}, paintCount: 0 }),
+
+  paintTile: (id) => {
+    const { selectedColor, tileColors } = get();
+    if (tileColors[id] === selectedColor) return;
+    set((s) => ({
+      tileColors: { ...s.tileColors, [id]: selectedColor },
+      paintCount: s.paintCount + 1,
     }));
   },
 
   paintRegion: (ids) => {
-    const { randomColorMode, selectedColor, paletteName } = get();
-    const palette = PALETTES[paletteName];
-    const color = randomColorMode
-      ? palette[Math.floor(Math.random() * palette.length)]
-      : selectedColor;
+    const { selectedColor } = get();
     const patch: Record<number, string> = {};
-    for (const id of ids) patch[id] = color;
-    set((state) => ({
-      tileColors: { ...state.tileColors, ...patch },
-      paintCount: state.paintCount + ids.length,
+    for (const id of ids) patch[id] = selectedColor;
+    set((s) => ({
+      tileColors: { ...s.tileColors, ...patch },
+      paintCount: s.paintCount + ids.length,
     }));
   },
 
   preFill: () => {
     const { gridSize, paletteName } = get();
-    const palette = PALETTES[paletteName];
-    const total = 6 * gridSize * gridSize;
-    const colors: Record<number, string> = {};
-    for (let i = 0; i < total; i++) {
-      colors[i] = palette[Math.floor(Math.random() * palette.length)];
-    }
-    set({ tileColors: colors, paintCount: total });
+    const colors = buildPreFill(gridSize, paletteName);
+    set({ tileColors: colors, paintCount: Object.keys(colors).length });
   },
 
   setSelectedColor: (color) => set({ selectedColor: color }),
-  setPalette: (name) =>
-    set({ paletteName: name, selectedColor: PALETTES[name][0] }),
-  setFillMode: (v) => set({ fillMode: v }),
-  setRandomColorMode: (v) => set({ randomColorMode: v }),
-  setRegionPaintMode: (v) => set({ regionPaintMode: v }),
+
+  setPalette: (name) => {
+    const { gameMode, gridSize } = get();
+    const newColor = PALETTES[name][0];
+    if (gameMode === "repaint") {
+      const colors = buildPreFill(gridSize, name);
+      set({ paletteName: name, selectedColor: newColor, tileColors: colors });
+    } else {
+      set({ paletteName: name, selectedColor: newColor });
+    }
+  },
+
+  setGridSize: (size) => {
+    const { gameMode, paletteName } = get();
+    if (gameMode === "repaint") {
+      const colors = buildPreFill(size, paletteName);
+      set({ gridSize: size, tileColors: colors, paintCount: Object.keys(colors).length });
+    } else {
+      set({ gridSize: size, tileColors: {}, paintCount: 0 });
+    }
+  },
+
   setGlowIntensity: (v) => set({ glowIntensity: v }),
   setAutoRotate: (v) => set({ autoRotate: v }),
   setShowSettings: (v) => set({ showSettings: v }),
 
-  clearAll: () => set({ tileColors: {}, paintCount: 0 }),
-
-  getNextColor: () => {
-    const { randomColorMode, selectedColor, paletteName } = get();
-    const palette = PALETTES[paletteName];
-    return randomColorMode
-      ? palette[Math.floor(Math.random() * palette.length)]
-      : selectedColor;
+  clearAll: () => {
+    const { gameMode, gridSize, paletteName } = get();
+    if (gameMode === "repaint") {
+      const colors = buildPreFill(gridSize, paletteName);
+      set({ tileColors: colors, paintCount: Object.keys(colors).length });
+    } else {
+      set({ tileColors: {}, paintCount: 0 });
+    }
   },
+
+  getNextColor: () => get().selectedColor,
 }));
