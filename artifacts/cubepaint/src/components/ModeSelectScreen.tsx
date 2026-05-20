@@ -1,6 +1,7 @@
-import { useEffect } from "react";
 import { useGameStore } from "../store/gameStore";
 import { startAmbientMusic, playMenuChime } from "../utils/audio";
+
+// Audio must only be called from user-gesture handlers — never from useEffect.
 
 function AnimCube({ colors }: { colors: string[] }) {
   return (
@@ -37,12 +38,9 @@ const REPAINT_COLORS = [
 export default function ModeSelectScreen() {
   const { startGame } = useGameStore();
 
-  useEffect(() => {
-    playMenuChime();
-    startAmbientMusic();
-  }, []);
-
   const handleStart = (mode: "draw" | "repaint") => {
+    // Called during a user click — AudioContext is allowed to start here
+    playMenuChime();
     startAmbientMusic();
     startGame(mode);
   };

@@ -9,7 +9,10 @@ function getCtx(): AudioContext {
     masterGain.gain.setValueAtTime(1, ctx.currentTime);
     masterGain.connect(ctx.destination);
   }
-  if (ctx.state === "suspended") ctx.resume();
+  // Always attempt to resume — browsers require this to be called during a user gesture
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {/* noop */});
+  }
   return ctx;
 }
 
@@ -165,18 +168,13 @@ export function playRotateSound(): void {
   } catch { /* silent fail */ }
 }
 
-/** Deep ambient drone — meditative ASMR pads */
-export function startAmbientMusic(): void {
-  if (ambientStarted) return;
-  ambientStarted = true;
-  try {
-    const audioCtx = getCtx();
-    const t = audioCtx.currentTime;
+function launchDrones(audioCtx: AudioContext): void {
+  const t = audioCtx.currentTime;
 
-    const ambGain = audioCtx.createGain();
-    ambGain.gain.setValueAtTime(0, t);
-    ambGain.gain.linearRampToValueAtTime(0.032, t + 3);
-    ambGain.connect(out());
+  const ambGain = audioCtx.createGain();
+  ambGain.gain.setValueAtTime(0, t);
+  ambGain.gain.linearRampToValueAtTime(0.032, t + 3);
+  ambGain.connect(out());
 
     // Low drone layers — slightly detuned for warmth
     const dronePairs: [number, number][] = [
@@ -222,26 +220,41 @@ export function startAmbientMusic(): void {
       });
     });
 
-    // High shimmer — faint upper harmonics
-    [880, 1108.7, 1318.5].forEach((freq, i) => {
-      const osc = audioCtx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, t);
-      const g = audioCtx.createGain();
-      g.gain.setValueAtTime(0.018 - i * 0.005, t);
-      const lfo = audioCtx.createOscillator();
-      lfo.type = "sine";
-      lfo.frequency.setValueAtTime(0.04 + i * 0.02, t);
-      const lg = audioCtx.createGain();
-      lg.gain.setValueAtTime(0.008, t);
-      lfo.connect(lg);
-      lg.connect(g.gain);
-      lfo.start(t);
-      osc.connect(g);
-      g.connect(ambGain);
-      osc.start(t);
-    });
-  } catch { /* silent fail */ }
+  // High shimmer — faint upper harmonics
+  [880, 1108.7, 1318.5].forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.018 - i * 0.005, t);
+    const lfo = audioCtx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.setValueAtTime(0.04 + i * 0.02, t);
+    const lg = audioCtx.createGain();
+    lg.gain.setValueAtTime(0.008, t);
+    lfo.connect(lg);
+    lg.connect(g.gain);
+    lfo.start(t);
+    osc.connect(g);
+    g.connect(ambGain);
+    osc.start(t);
+  });
+}
+
+/** Deep ambient drone — meditative ASMR pads.
+ *  Must be called from a user-gesture handler so the AudioContext can start. */
+export function startAmbientMusic(): void {
+  if (ambientStarted) return;
+  ambientStarted = true;
+  try {
+    const audioCtx = getCtx();
+    if (audioCtx.state === "suspended") {
+      // Wait for resume to complete, then launch
+      audioCtx.resume().then(() => launchDrones(audioCtx)).catch(() => { ambientStarted = false; });
+    } else {
+      launchDrones(audioCtx);
+    }
+  } catch { ambientStarted = false; }
 }
 
 export function triggerHaptic(): void {
