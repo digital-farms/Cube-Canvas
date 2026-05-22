@@ -24,9 +24,9 @@ function ReactiveLight() {
     currentColor.current.lerp(paintEvent.color, Math.min(1, 4 * delta));
     lightRef.current.color.copy(currentColor.current);
 
-    // Bright flash then settle to ambient glow
+    // Short local flash without lifting the whole background.
     const burst = Math.max(0, 1 - paintEvent.age * 1.1);
-    lightRef.current.intensity = 0.4 + burst * 3.2;
+    lightRef.current.intensity = 0.16 + burst * 1.25;
   });
 
   return (
@@ -80,7 +80,7 @@ function NebulaCloud() {
         sizeAttenuation
         vertexColors
         transparent
-        opacity={0.18}
+        opacity={0.07}
         blending={THREE.AdditiveBlending}
         depthWrite={false}
       />
@@ -100,18 +100,18 @@ export default function Scene() {
         alpha: false,
         powerPreference: "high-performance",
       }}
-      style={{ background: "#070714" }}
+      style={{ background: "#070714", touchAction: "none" }}
     >
       <color attach="background" args={["#070714"]} />
       <fog attach="fog" args={["#070714", 8, 20]} />
 
-      <ambientLight intensity={0.22} color="#7070cc" />
-      <directionalLight position={[3, 3, 3]} intensity={0.45} color="#ffffff" />
-      <directionalLight position={[-3, -1, -2]} intensity={0.18} color="#4040ff" />
-      <pointLight position={[0, 3, 0]} intensity={0.7} color="#ff40ff" distance={8} />
-      <pointLight position={[0, -3, 0]} intensity={0.45} color="#4080ff" distance={8} />
-      <pointLight position={[3, 0, 0]} intensity={0.35} color="#ff8040" distance={8} />
-      <pointLight position={[-3, 0, 0]} intensity={0.35} color="#40ffff" distance={8} />
+      <ambientLight intensity={0.19} color="#7070cc" />
+      <directionalLight position={[3, 3, 3]} intensity={0.44} color="#ffffff" />
+      <directionalLight position={[-3, -1, -2]} intensity={0.12} color="#4040ff" />
+      <pointLight position={[0, 3, 0]} intensity={0.36} color="#ff40ff" distance={5.5} />
+      <pointLight position={[0, -3, 0]} intensity={0.22} color="#4080ff" distance={5.5} />
+      <pointLight position={[3, 0, 0]} intensity={0.18} color="#ff8040" distance={5.5} />
+      <pointLight position={[-3, 0, 0]} intensity={0.18} color="#40ffff" distance={5.5} />
 
       {/* Reactive light — chases last paint color */}
       <ReactiveLight />
@@ -132,10 +132,10 @@ export default function Scene() {
 
       <EffectComposer>
         <Bloom
-          intensity={glowIntensity * 2.0}
-          luminanceThreshold={0.08}
-          luminanceSmoothing={0.85}
-          radius={0.9}
+          intensity={glowIntensity * 1.05}
+          luminanceThreshold={0.62}
+          luminanceSmoothing={0.28}
+          radius={0.42}
         />
       </EffectComposer>
     </Canvas>

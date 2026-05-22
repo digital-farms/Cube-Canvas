@@ -568,10 +568,78 @@ html, body, #root {
   opacity: 0;
   background: radial-gradient(
     ellipse at center,
-    transparent 40%,
-    var(--pf-color, #8000ff) 130%
+    transparent 58%,
+    color-mix(in srgb, var(--pf-color, #8000ff) 42%, transparent) 100%
   );
   mix-blend-mode: screen;
+}
+
+/* Immersive no-text mode */
+.app-header {
+  display: none;
+}
+
+.mode-logo-title,
+.mode-subtitle,
+.mode-card-title,
+.mode-card-desc,
+.mode-card-start,
+.palette-popup-title,
+.palette-option span,
+.color-label,
+.settings-header,
+.settings-label,
+.toggle-row > span,
+.value-label {
+  display: none !important;
+}
+
+.selected-color-preview {
+  width: auto;
+  padding: 6px;
+  gap: 0;
+}
+
+.palette-option {
+  justify-content: center;
+  min-height: 38px;
+}
+
+.settings-panel {
+  width: min(220px, calc(100vw - 24px));
+}
+
+.settings-section {
+  margin-bottom: 14px;
+}
+
+.size-btn {
+  font-size: 0;
+  min-height: 32px;
+}
+
+.size-btn::before {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  border: 1px solid currentColor;
+  background:
+    linear-gradient(currentColor 0 0) 50% 0 / 1px 100% no-repeat,
+    linear-gradient(currentColor 0 0) 0 50% / 100% 1px no-repeat;
+  opacity: 0.8;
+}
+
+.settings-btn {
+  font-size: 0;
+  width: 44px;
+  flex: 0 0 44px;
+  justify-content: center;
+}
+
+.settings-btn svg {
+  flex: 0 0 auto;
 }
 
 .paint-flash.pf-active {
@@ -579,8 +647,8 @@ html, body, #root {
 }
 
 @keyframes pfAnim {
-  0%   { opacity: 0.55; }
-  30%  { opacity: 0.38; }
+  0%   { opacity: var(--pf-intensity, 0.12); }
+  32%  { opacity: calc(var(--pf-intensity, 0.12) * 0.55); }
   100% { opacity: 0; }
 }
 

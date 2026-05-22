@@ -54,7 +54,7 @@ export default function AmbientParticles() {
         size={0.025}
         color="#6040ff"
         transparent
-        opacity={0.5}
+        opacity={0.22}
         sizeAttenuation
         depthWrite={false}
       />

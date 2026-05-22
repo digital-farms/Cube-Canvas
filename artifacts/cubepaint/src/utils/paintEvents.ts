@@ -15,14 +15,16 @@ export function registerFlashEl(el: HTMLElement | null): void {
 }
 
 /** Call from any paint event — fires CSS flash + updates reactive light color. */
-export function triggerPaintFlash(color: string): void {
+export function triggerPaintFlash(color: string, intensity = 0.18): void {
   paintEvent.color.set(color);
   paintEvent.age = 0;
 
   const el = _flashEl;
   if (!el) return;
   if (_flashTimer) clearTimeout(_flashTimer);
+  const safeIntensity = Math.max(0.04, Math.min(0.28, intensity));
   el.style.setProperty("--pf-color", color);
+  el.style.setProperty("--pf-intensity", String(safeIntensity));
   el.classList.remove("pf-active");
   void el.offsetWidth; // force reflow
   el.classList.add("pf-active");

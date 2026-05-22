@@ -27,12 +27,15 @@ const FACE_NORMALS = [
 const UNPAINTED_COLOR = new THREE.Color(DEFAULT_TILE_COLOR);
 const GLOW_BLACK = new THREE.Color(0, 0, 0);
 const HOVER_BOOST = new THREE.Color("#ffffff");
+const PAINTED_GLOW = 1.35;
 const tmpColor = new THREE.Color();
 const tmpVec3 = new THREE.Vector3();
 const tmpQuat = new THREE.Quaternion();
 const tmpScale = new THREE.Vector3();
 
 const MAX_PARTICLES = 220;
+const MIN_ZOOM = 0.72;
+const MAX_ZOOM = 2.25;
 
 interface Particle {
   x: number; y: number; z: number;
@@ -54,6 +57,16 @@ function getNeighbors(id: number, N: number): number[] {
   if (col > 0) r.push(base + row * N + (col - 1));
   if (col < N - 1) r.push(base + row * N + (col + 1));
   return r;
+}
+
+function getTileCoord(id: number, N: number): { face: number; row: number; col: number } {
+  const face = Math.floor(id / (N * N));
+  const local = id % (N * N);
+  return {
+    face,
+    row: Math.floor(local / N),
+    col: local % N,
+  };
 }
 
 function getConnectedRegion(
@@ -89,7 +102,18 @@ function springPop(t: number): number {
   return 1 - (1 - (t - 0.72) / 0.28) * 0.06;                  // settle
 }
 
+function clampZoom(v: number): number {
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v));
+}
+
+function pointerDistance(points: Map<number, { x: number; y: number }>): number {
+  const [a, b] = Array.from(points.values());
+  if (!a || !b) return 0;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 interface PopAnim { id: number; t: number }
+interface WaveAnim { t: number; delay: number; color: string }
 
 export default function PaintableCube() {
   const tilesRef = useRef<THREE.InstancedMesh>(null!);
@@ -104,14 +128,22 @@ export default function PaintableCube() {
   const hoveredId = useRef(-1);
   const popAnims = useRef<Map<number, PopAnim>>(new Map());
   const rippleAnims = useRef<Map<number, { t: number; color: string }>>(new Map());
+  const waveAnims = useRef<Map<number, WaveAnim>>(new Map());
   const isDragging = useRef(false);
   const pointerDown = useRef(false);
   const pointerMoved = useRef(false);
+  const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const isPinching = useRef(false);
+  const pinchStartDistance = useRef(0);
+  const pinchStartZoom = useRef(1);
+  const pinchJustEnded = useRef(false);
   const lastPainted = useRef(-1);
   const lastPointer = useRef({ x: 0, y: 0 });
   const targetRot = useRef({ x: 0.3, y: 0.5 });
   const currentRot = useRef({ x: 0.3, y: 0.5 });
   const rotVel = useRef({ x: 0, y: 0 });
+  const targetZoom = useRef(1);
+  const currentZoom = useRef(1);
 
   // ── Particles ────────────────────────────────────────────────────────────────
   const pGeo = useMemo(() => {
@@ -216,7 +248,7 @@ export default function PaintableCube() {
       const hex = tileColors[i];
       if (hex) {
         tm.setColorAt(i, tmpColor.set(hex));
-        gm.setColorAt(i, tmpColor.set(hex).multiplyScalar(glowIntensity * 1.2));
+        gm.setColorAt(i, tmpColor.set(hex).multiplyScalar(glowIntensity * PAINTED_GLOW));
       } else {
         tm.setColorAt(i, UNPAINTED_COLOR);
         gm.setColorAt(i, GLOW_BLACK);
@@ -231,7 +263,7 @@ export default function PaintableCube() {
     const gm = glowRef.current;
     for (let i = 0; i < totalTiles; i++) {
       const hex = tileColors[i];
-      gm.setColorAt(i, hex ? tmpColor.set(hex).multiplyScalar(glowIntensity * 1.2) : GLOW_BLACK);
+      gm.setColorAt(i, hex ? tmpColor.set(hex).multiplyScalar(glowIntensity * PAINTED_GLOW) : GLOW_BLACK);
     }
     if (gm.instanceColor) gm.instanceColor.needsUpdate = true;
   }, [glowIntensity]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -297,6 +329,27 @@ export default function PaintableCube() {
     [N]
   );
 
+  const addPaintWave = useCallback(
+    (startId: number, tileIds: number[], color: string) => {
+      const start = getTileCoord(startId, N);
+      const maxTiles = 180;
+      const stride = Math.max(1, Math.ceil(tileIds.length / maxTiles));
+
+      tileIds.forEach((id, index) => {
+        if (index % stride !== 0 && id !== startId) return;
+        const coord = getTileCoord(id, N);
+        if (coord.face !== start.face) return;
+        const dist = Math.hypot(coord.row - start.row, coord.col - start.col);
+        waveAnims.current.set(id, {
+          t: 0,
+          delay: dist * 0.026,
+          color,
+        });
+      });
+    },
+    [N]
+  );
+
   const doPaint = useCallback(
     (id: number) => {
       if (id < 0 || id === lastPainted.current) return;
@@ -310,30 +363,43 @@ export default function PaintableCube() {
           paintRegion(region);
           playRegionFillSound(region.length);
           triggerHaptic();
-          triggerPaintFlash(state.selectedColor);
+          const flashIntensity = Math.min(0.28, 0.06 + Math.sqrt(region.length) * 0.018);
+          triggerPaintFlash(state.selectedColor, flashIntensity);
           // Particles: burst from center few tiles of region
           const sample = region.slice(0, Math.min(6, region.length));
           sample.forEach((rid) => spawnBurst(rid, state.selectedColor, 4));
           region.forEach((rid) => popAnims.current.set(rid, { id: rid, t: 0 }));
+          addPaintWave(id, region, state.selectedColor);
           addRipple(region.slice(0, 10), state.selectedColor, 30);
         }
       } else {
         paintTile(id);
         playPaintSound(state.selectedColor);
         triggerHaptic();
-        triggerPaintFlash(state.selectedColor);
+        triggerPaintFlash(state.selectedColor, 0.07);
         spawnBurst(id, state.selectedColor, 10);
         popAnims.current.set(id, { id, t: 0 });
         addRipple([id], state.selectedColor, 8);
       }
     },
-    [paintTile, paintRegion, spawnBurst, addRipple]
+    [paintTile, paintRegion, spawnBurst, addRipple, addPaintWave]
   );
 
   useEffect(() => {
     const canvas = gl.domElement;
 
     const onDown = (e: PointerEvent) => {
+      activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activePointers.current.size >= 2) {
+        isPinching.current = true;
+        pointerMoved.current = true;
+        pinchJustEnded.current = false;
+        pinchStartDistance.current = pointerDistance(activePointers.current);
+        pinchStartZoom.current = targetZoom.current;
+        lastPainted.current = -1;
+        return;
+      }
+
       pointerDown.current = true;
       pointerMoved.current = false;
       isDragging.current = false;
@@ -342,6 +408,18 @@ export default function PaintableCube() {
     };
 
     const onMove = (e: PointerEvent) => {
+      if (activePointers.current.has(e.pointerId)) {
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      if (isPinching.current && activePointers.current.size >= 2) {
+        const dist = pointerDistance(activePointers.current);
+        if (pinchStartDistance.current > 0 && dist > 0) {
+          targetZoom.current = clampZoom(pinchStartZoom.current * (dist / pinchStartDistance.current));
+        }
+        return;
+      }
+
       const dx = e.clientX - lastPointer.current.x;
       const dy = e.clientY - lastPointer.current.y;
 
@@ -367,6 +445,20 @@ export default function PaintableCube() {
     };
 
     const onUp = (e: PointerEvent) => {
+      activePointers.current.delete(e.pointerId);
+      if (isPinching.current) {
+        if (activePointers.current.size < 2) {
+          isPinching.current = false;
+          pinchJustEnded.current = true;
+          pointerDown.current = false;
+          isDragging.current = false;
+          lastPainted.current = -1;
+          setTimeout(() => { pinchJustEnded.current = false; }, 80);
+        }
+        return;
+      }
+
+      if (pinchJustEnded.current) return;
       if (!pointerMoved.current) {
         doPaint(pickInstance(e.clientX, e.clientY));
       }
@@ -376,20 +468,32 @@ export default function PaintableCube() {
     };
 
     const onLeave = () => {
+      activePointers.current.clear();
       hoveredId.current = -1;
       pointerDown.current = false;
+      isPinching.current = false;
       isDragging.current = false;
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.001);
+      targetZoom.current = clampZoom(targetZoom.current * factor);
     };
 
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
     canvas.addEventListener("pointerleave", onLeave);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("pointerleave", onLeave);
+      canvas.removeEventListener("wheel", onWheel);
     };
   }, [gl, pickInstance, doPaint]);
 
@@ -412,6 +516,8 @@ export default function PaintableCube() {
 
     groupRef.current.rotation.x = currentRot.current.x;
     groupRef.current.rotation.y = currentRot.current.y;
+    currentZoom.current += (targetZoom.current - currentZoom.current) * Math.min(1, 12 * delta);
+    groupRef.current.scale.setScalar(currentZoom.current);
 
     let matDirty = false;
     let glowDirty = false;
@@ -446,14 +552,42 @@ export default function PaintableCube() {
         const hex = store.tileColors[id];
         glowRef.current.setColorAt(
           id,
-          hex ? tmpColor.set(hex).multiplyScalar(store.glowIntensity * 1.2) : GLOW_BLACK
+          hex ? tmpColor.set(hex).multiplyScalar(store.glowIntensity * PAINTED_GLOW) : GLOW_BLACK
         );
         glowDirty = true;
         return;
       }
       const boost = Math.sin(anim.t * Math.PI) * 2.8;
       const hex = store.tileColors[id] ?? anim.color;
-      glowRef.current.setColorAt(id, tmpColor.set(hex).multiplyScalar(store.glowIntensity * 1.2 + boost));
+      glowRef.current.setColorAt(id, tmpColor.set(hex).multiplyScalar(store.glowIntensity * PAINTED_GLOW + boost * 0.5));
+      glowDirty = true;
+    });
+
+    // Energy wave for region fills: a delayed glow sweep from the touched tile.
+    waveAnims.current.forEach((anim, id) => {
+      anim.t += delta;
+      const age = anim.t - anim.delay;
+      if (age < 0) return;
+
+      const duration = 0.46;
+      if (age >= duration) {
+        waveAnims.current.delete(id);
+        const hex = store.tileColors[id];
+        glowRef.current.setColorAt(
+          id,
+          hex ? tmpColor.set(hex).multiplyScalar(store.glowIntensity * PAINTED_GLOW) : GLOW_BLACK
+        );
+        glowDirty = true;
+        return;
+      }
+
+      const phase = age / duration;
+      const crest = Math.sin(phase * Math.PI);
+      const hex = store.tileColors[id] ?? anim.color;
+      glowRef.current.setColorAt(
+        id,
+        tmpColor.set(hex).multiplyScalar(store.glowIntensity * PAINTED_GLOW + crest * 1.15)
+      );
       glowDirty = true;
     });
 
