@@ -8,34 +8,63 @@ export function getAudioState(): AudioState {
   return ctx.state === "running" ? "running" : "suspended";
 }
 
+function getAudioContext(): AudioContext {
+  if (!ctx || ctx.state === "closed") {
+    const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
+    ctx = new Ctx();
+    masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.86, ctx.currentTime);
+    masterGain.connect(ctx.destination);
+  }
+  return ctx;
+}
+
+function playSilentUnlockTick(audioCtx: AudioContext): void {
+  const silentBuf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+  const silentSrc = audioCtx.createBufferSource();
+  silentSrc.buffer = silentBuf;
+  silentSrc.connect(audioCtx.destination);
+  silentSrc.start(0);
+
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.00001, audioCtx.currentTime);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(audioCtx.currentTime);
+  osc.stop(audioCtx.currentTime + 0.03);
+}
+
 export function unlockAudio(): Promise<AudioContext> {
-  return new Promise((resolve, reject) => {
-    try {
-      if (!ctx || ctx.state === "closed") {
-        const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
-        ctx = new Ctx();
-        masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(0.72, ctx.currentTime);
-        masterGain.connect(ctx.destination);
-      }
+  try {
+    const audioCtx = getAudioContext();
+    playSilentUnlockTick(audioCtx);
 
-      const audioCtx = ctx;
-      const silentBuf = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
-      const silentSrc = audioCtx.createBufferSource();
-      silentSrc.buffer = silentBuf;
-      silentSrc.connect(audioCtx.destination);
-      silentSrc.start(0);
-
-      if (audioCtx.state === "running") {
-        resolve(audioCtx);
-        return;
-      }
-
-      audioCtx.resume().then(() => resolve(audioCtx)).catch(reject);
-    } catch (e) {
-      reject(e);
+    if (audioCtx.state === "running") {
+      return Promise.resolve(audioCtx);
     }
-  });
+
+    return new Promise((resolve, reject) => {
+      const done = window.setTimeout(() => {
+        audioCtx.removeEventListener("statechange", onState);
+        if (audioCtx.state === "running") resolve(audioCtx);
+        else reject(new Error("AudioContext did not start"));
+      }, 1200);
+
+      const onState = () => {
+      if (audioCtx.state === "running") {
+          window.clearTimeout(done);
+          audioCtx.removeEventListener("statechange", onState);
+        resolve(audioCtx);
+      }
+      };
+
+      audioCtx.addEventListener("statechange", onState);
+      audioCtx.resume().then(onState).catch(reject);
+    });
+  } catch (e) {
+    return Promise.reject(e);
+  }
 }
 
 function getOut(): GainNode {
@@ -44,13 +73,15 @@ function getOut(): GainNode {
 
 function withAudio(play: (audioCtx: AudioContext, t: number) => void): void {
   try {
-    if (ctx && ctx.state === "running") {
-      play(ctx, ctx.currentTime + 0.012);
+    const audioCtx = getAudioContext();
+    if (audioCtx.state === "running") {
+      play(audioCtx, audioCtx.currentTime + 0.012);
       return;
     }
-    unlockAudio()
-      .then((audioCtx) => play(audioCtx, audioCtx.currentTime + 0.012))
-      .catch(() => { /* noop */ });
+
+    playSilentUnlockTick(audioCtx);
+    play(audioCtx, audioCtx.currentTime + 0.06);
+    void audioCtx.resume();
   } catch { /* noop */ }
 }
 
