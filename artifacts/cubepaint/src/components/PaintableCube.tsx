@@ -3,7 +3,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useGameStore } from "../store/gameStore";
 import { DEFAULT_TILE_COLOR } from "../utils/colors";
-import { playPaintSound, playRegionFillSound, triggerHaptic } from "../utils/audio";
+import { playPaintSound, playRegionFillSound, primeAudioForGesture, triggerHaptic } from "../utils/audio";
 import { triggerPaintFlash } from "../utils/paintEvents";
 
 const FACE_CONFIGS = [
@@ -389,6 +389,7 @@ export default function PaintableCube() {
     const canvas = gl.domElement;
 
     const onDown = (e: PointerEvent) => {
+      primeAudioForGesture();
       activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (activePointers.current.size >= 2) {
         isPinching.current = true;

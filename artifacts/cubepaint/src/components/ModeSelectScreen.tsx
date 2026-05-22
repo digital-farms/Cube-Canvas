@@ -1,7 +1,5 @@
 import { useGameStore } from "../store/gameStore";
-import { startAmbientMusic, playMenuChime } from "../utils/audio";
-
-// Audio must only be called from user-gesture handlers — never from useEffect.
+import { startAmbientMusic, playMenuChime, primeAudioForGesture } from "../utils/audio";
 
 function AnimCube({ colors }: { colors: string[] }) {
   return (
@@ -30,16 +28,15 @@ function AnimCube({ colors }: { colors: string[] }) {
 const EMPTY_COLORS = Array(27).fill("#0d0d22");
 
 const REPAINT_COLORS = [
-  "#FF0080","#FF8C00","#00FF41","#0080FF","#FF0080","#FFE500","#8000FF","#00FFFF","#FF0080",
-  "#B967FF","#01CDFE","#05FFA1","#FF71CE","#FFFB96","#FF6B6B","#4ECDC4","#45B7D1","#B967FF",
-  "#FF00FF","#CC00FF","#9900FF","#FF0066","#00FFCC","#00CCFF","#FF3300","#FF9900","#FF00FF",
+  "#FF0080", "#FF8C00", "#00FF41", "#0080FF", "#FF0080", "#FFE500", "#8000FF", "#00FFFF", "#FF0080",
+  "#B967FF", "#01CDFE", "#05FFA1", "#FF71CE", "#FFFB96", "#FF6B6B", "#4ECDC4", "#45B7D1", "#B967FF",
+  "#FF00FF", "#CC00FF", "#9900FF", "#FF0066", "#00FFCC", "#00CCFF", "#FF3300", "#FF9900", "#FF00FF",
 ];
 
 export default function ModeSelectScreen() {
   const { startGame } = useGameStore();
 
   const handleStart = (mode: "draw" | "repaint") => {
-    // Called during a user click — AudioContext is allowed to start here
     playMenuChime();
     startAmbientMusic();
     startGame(mode);
@@ -57,8 +54,12 @@ export default function ModeSelectScreen() {
         <p className="mode-subtitle">Выбери режим</p>
 
         <div className="mode-cards">
-          {/* Draw mode */}
-          <button className="mode-card" onClick={() => handleStart("draw")}>
+          <button
+            className="mode-card"
+            onPointerDown={primeAudioForGesture}
+            onTouchStart={primeAudioForGesture}
+            onClick={() => handleStart("draw")}
+          >
             <div className="mode-card-glow mode-card-glow--draw" />
             <AnimCube colors={EMPTY_COLORS} />
             <div className="mode-card-body">
@@ -71,8 +72,12 @@ export default function ModeSelectScreen() {
             <div className="mode-card-start">Начать</div>
           </button>
 
-          {/* Repaint mode */}
-          <button className="mode-card" onClick={() => handleStart("repaint")}>
+          <button
+            className="mode-card"
+            onPointerDown={primeAudioForGesture}
+            onTouchStart={primeAudioForGesture}
+            onClick={() => handleStart("repaint")}
+          >
             <div className="mode-card-glow mode-card-glow--repaint" />
             <AnimCube colors={REPAINT_COLORS} />
             <div className="mode-card-body">

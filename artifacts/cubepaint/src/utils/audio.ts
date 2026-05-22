@@ -13,7 +13,7 @@ function getAudioContext(): AudioContext {
     const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
     ctx = new Ctx();
     masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.86, ctx.currentTime);
+    masterGain.gain.setValueAtTime(1, ctx.currentTime);
     masterGain.connect(ctx.destination);
   }
   return ctx;
@@ -52,11 +52,11 @@ export function unlockAudio(): Promise<AudioContext> {
       }, 1200);
 
       const onState = () => {
-      if (audioCtx.state === "running") {
+        if (audioCtx.state === "running") {
           window.clearTimeout(done);
           audioCtx.removeEventListener("statechange", onState);
-        resolve(audioCtx);
-      }
+          resolve(audioCtx);
+        }
       };
 
       audioCtx.addEventListener("statechange", onState);
@@ -65,6 +65,14 @@ export function unlockAudio(): Promise<AudioContext> {
   } catch (e) {
     return Promise.reject(e);
   }
+}
+
+export function primeAudioForGesture(): void {
+  try {
+    const audioCtx = getAudioContext();
+    playSilentUnlockTick(audioCtx);
+    void audioCtx.resume();
+  } catch { /* noop */ }
 }
 
 function getOut(): GainNode {
@@ -124,7 +132,7 @@ function tone(audioCtx: AudioContext, freq: number, vol: number, duration: numbe
 export function playPaintSound(color: string): void {
   withAudio((audioCtx, t) => {
     const freq = pickNote(parseInt(color.replace("#", "").slice(0, 2), 16));
-    tone(audioCtx, freq, 0.18, 0.7, t);
+    tone(audioCtx, freq, 0.26, 0.7, t);
   });
 }
 
@@ -132,7 +140,7 @@ export function playRegionFillSound(regionSize: number): void {
   withAudio((audioCtx, t) => {
     const steps = Math.min(regionSize, 8);
     for (let i = 0; i < steps; i++) {
-      tone(audioCtx, PENTATONIC[i % PENTATONIC.length], 0.15 - i * 0.01, 0.75, t + i * 0.055);
+      tone(audioCtx, PENTATONIC[i % PENTATONIC.length], 0.22 - i * 0.012, 0.75, t + i * 0.055);
     }
   });
 }
@@ -140,7 +148,7 @@ export function playRegionFillSound(regionSize: number): void {
 export function playMenuChime(): void {
   withAudio((audioCtx, t) => {
     [392.0, 493.88, 587.33, 783.99].forEach((freq, i) => {
-      tone(audioCtx, freq, 0.18, 1.3, t + 0.03 + i * 0.14);
+      tone(audioCtx, freq, 0.26, 1.3, t + 0.03 + i * 0.14);
     });
   });
 }
